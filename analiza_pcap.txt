@@ -1,0 +1,110 @@
+Analiza traficului malitios din network_attacks_v2.pcap
+======================================================
+
+Fisierul contine 515 pachete capturate intre 192.168.1.10 (victima),
+93.184.216.34 (server example.com) si diverse alte IP-uri.
+
+Au fost identificate urmatoarele categorii de atacuri:
+
+
+1. ARP Spoofing (Man-in-the-Middle)
+------------------------------------
+Pachete relevante: 27-28, 48-49, 62-63, 71-72, 83-84, 99-100, 124-125, 139-142, 273-274
+
+Descriere:
+  Se observa pachete ARP Reply (op=2) nesolicitate (gratuitous ARP) cu adresa MAC
+  de:ad:be:ef:ca:fe. Aceasta MAC falsifica atat IP-ul gateway-ului (192.168.1.1)
+  cat si IP-ul victimei (192.168.1.10).
+
+De ce e suspect:
+  - Adresa MAC "de:ad:be:ef:ca:fe" este in mod evident falsificata (dead beef cafe).
+  - Ambele IP-uri (gateway + victima) sunt asociate cu aceeasi MAC falsa.
+  - Sunt ARP Reply-uri fara ARP Request corespunzator (unsolicited).
+  - Acest lucru permite atacatorului sa intercepteze tot traficul dintre victima
+    si gateway (atac Man-in-the-Middle).
+
+Categorie: ARP Spoofing / Man-in-the-Middle (MITM)
+
+
+2. SYN Flood (Denial of Service)
+---------------------------------
+Pachete relevante: ~102 pachete SYN de la 81 de IP-uri sursa unice catre 93.184.216.34:80
+
+Descriere:
+  Se observa un numar mare de pachete TCP SYN catre portul 80 al serverului,
+  provenind de la zeci de adrese IP diferite din reteaua 10.0.0.0/8
+  (ex: 10.136.174.29, 10.70.252.24, 10.249.79.49 etc.).
+  Niciuna dintre aceste conexiuni nu se finalizeaza (nu exista handshake complet).
+
+De ce e suspect:
+  - 81 de IP-uri sursa unice trimit doar SYN fara sa completeze handshake-ul TCP.
+  - IP-urile sursa sunt probabil spoofed (falsificate) - distribuite aleatoriu in 10.0.0.0/8.
+  - Scopul este epuizarea resurselor serverului (tabela de conexiuni half-open).
+
+Categorie: SYN Flood / Distributed Denial of Service (DDoS)
+
+
+3. ICMP Flood (Ping Flood)
+---------------------------
+Pachete relevante: 146 pachete ICMP, din care 100 echo-request de la 192.168.1.99
+
+Descriere:
+  Adresa 192.168.1.99 trimite 100 de pachete ICMP echo-request catre server.
+  Aceasta cantitate este anormal de mare pentru un ping legitim.
+
+De ce e suspect:
+  - Un ping normal trimite 4-5 pachete. 100 de echo-request indica un ping flood.
+  - Scopul este supraincarcarea victimei cu trafic ICMP.
+  - Poate fi folosit si pentru reconnaissance (mapping de retea).
+
+Categorie: ICMP Flood / Denial of Service (DoS)
+
+
+4. Credential Sniffing (Interceptare credentiale in clar)
+----------------------------------------------------------
+Pachete relevante: 79-80
+
+Descriere:
+  Se observa doua cereri POST /login identice trimise in clar (HTTP, nu HTTPS)
+  cu credentiale vizibile: username=alice&password=s3cr3t.
+  Cererea este duplicata (pachetele 79 si 80 sunt identice).
+
+De ce e suspect:
+  - Credentialele sunt transmise in clar, fara criptare (HTTP pe port 80).
+  - In contextul atacului ARP Spoofing de mai sus, atacatorul MITM poate
+    intercepta usor aceste credentiale.
+  - Duplicarea cererii POST poate indica un atac de tip replay.
+
+Categorie: Credential Sniffing / Session Hijacking
+
+
+5. Session Hijacking / Replay Attack (CSRF)
+---------------------------------------------
+Pachete relevante: 111, 126, 128
+
+Descriere:
+  Se observa cereri POST /transfer repetate catre bank.example.com cu
+  payload-ul "amount=500&to_account=123456". Cererea de transfer bancar
+  apare de 3 ori.
+
+De ce e suspect:
+  - Aceeasi tranzactie bancara este trimisa de 3 ori (replay attack).
+  - Host-ul este bank.example.com dar IP-ul destinatie este 93.184.216.34
+    (example.com) - indica o posibila redirectionare prin MITM.
+  - Lipsa protectiei CSRF (token anti-replay) permite retrimiterea cererii.
+  - Combinat cu ARP Spoofing, atacatorul a interceptat si retrimis cererea
+    de transfer bancar.
+
+Categorie: Replay Attack / Cross-Site Request Forgery (CSRF)
+
+
+Concluzie
+---------
+Captura demonstreaza un scenariu de atac complet in mai multi pasi:
+  1. ARP Spoofing pentru a se pozitiona ca Man-in-the-Middle
+  2. Interceptarea credentialelor transmise in clar (HTTP)
+  3. SYN Flood si ICMP Flood ca atacuri DoS complementare
+  4. Replay Attack pe tranzactii bancare interceptate
+
+Toate aceste atacuri sunt facilitate de lipsa criptarii (HTTP in loc de HTTPS)
+si de absenta protectiilor la nivel de retea (ARP static, rate limiting, CSRF tokens).
